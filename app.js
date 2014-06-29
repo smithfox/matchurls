@@ -33,14 +33,18 @@ app.use(express.static(path.join(__dirname, 'public')));
 // }
 
 app.get('/', function(req, res){
-    res.redirect("/tools/matchurls");
+    res.redirect("/page/matchurls");
 });
 
-app.get('/tools/matchurls', function(req, res){
+var matchurls_func = function(req, res, content_type) {
     var matchId = req.query.matchid;
     if (!matchId) {
-        // No match ID, display regular index.
-        res.render('index', { title: 'match urls!' });
+        if(content_type=="html") {
+            // No match ID, display regular index.
+            res.render('index', { title: 'match urls!' });
+        } else {//json
+            res.json({"err":"invalid matchid"});
+        }
         res.end();
     }
     else {
@@ -48,70 +52,105 @@ app.get('/tools/matchurls', function(req, res){
             matchId = parseInt(matchId, 10);
 
             mongodb.findByMatchId(matchId, function(err, data) {
-                if (err) throw err;
+                if (err) {
+                    console.log('mongodb find match err')
+                    //throw err; 
+                }
 
                 if (data) {
                     // We have this appid data already in mongodb, so just serve from there.
-                    res.render('index', {
-                        title: 'match urls!',
-                        matchid: matchId,
-                        replayState: data.state,
-                        replayUrl: util.format("http://replay%s.valve.net/570/%s_%s.dem.bz2", data.cluster, data.id, data.salt)
-                    });
+                    if(content_type=="html") {
+                        res.render('index', {
+                            title: 'match urls!',
+                            matchid: matchId,
+                            replayState: data.state,
+                            replayUrl: util.format("http://replay%s.valve.net/570/%s_%s.dem.bz2", data.cluster, data.id, data.salt)
+                        });
+                    } else {
+                        res.json({"matchId":matchId,"replayId":data.id,"replayState":data.state,"replaySalt":data.salt,"replayUrl":util.format("http://replay%s.valve.net/570/%s_%s.dem.bz2", data.cluster, data.id, data.salt)})
+                    }
                     res.end();
                 }
                 else if (steam.ready) {
                     // We need new data from Dota.
                     steam.getMatchDetails(matchId, function(err, data) {
                         if (err) {
-                            res.render('index', {
-                                title: 'match urls!',
-                                error: err
-                            });
+                            if(content_type=="html") {
+                                res.render('index', {
+                                    title: 'match urls!',
+                                    error: err
+                                });
+                            } else {
+                                res.json({"err":err});
+                            }
                             res.end();
                         }
                         else {
                             // Save the new data to Mongo
                             mongodb.save(data, function(err, cb){});
+                            if(content_type=="html") {
+                                res.render('index', {
+                                    title: 'match urls!',
+                                    matchid: matchId,
+                                    replayState: data.state,
+                                    replayUrl: util.format("http://replay%s.valve.net/570/%s_%s.dem.bz2", data.cluster, data.id, data.salt)
+                                });
+                            } else {
+                                res.json({"matchId":matchId,"replayId":data.id,"replayState":data.state,"replaySalt":data.salt,"replayUrl":util.format("http://replay%s.valve.net/570/%s_%s.dem.bz2", data.cluster, data.id, data.salt)})
 
-                            res.render('index', {
-                                title: 'match urls!',
-                                matchid: matchId,
-                                replayState: data.state,
-                                replayUrl: util.format("http://replay%s.valve.net/570/%s_%s.dem.bz2", data.cluster, data.id, data.salt)
-                            });
+                            }
                             res.end();
                         }
                     });
 
                     // If Dota hasn't responded by 'request_timeout' then send a timeout page.
                     setTimeout(function(){
-                        res.render('index', {
-                            title: 'match urls!',
-                            error: "timeout"
-                        });
+                        if(content_type=="html") {
+                            res.render('index', {
+                                title: 'match urls!',
+                                error: "timeout"
+                            });
+                        } else {
+                            res.json({"err":"timeout"});
+                        }
                         res.end();
                     }, config.request_timeout);
                 }
                 else {
                     // We need new data from Dota, and Dota is not ready.
-                    res.render('index', {
-                        title: 'match urls!',
-                        error: "notready"
-                    });
+                    if(content_type=="html") {
+                        res.render('index', {
+                            title: 'match urls!',
+                            error: "notready"
+                        });
+                    } else {
+                        res.json({"err":"steam notready"});
+                    }
                     res.end();
                 }
             });
         }
         else {
             // Match ID failed validation.
-            res.render('index', {
-                title: 'match urls!',
-                error: "invalid"
-            });
+            if(content_type=="html") {
+                res.render('index', {
+                    title: 'match urls!',
+                    error: "invalid"
+                });
+            } else {
+                res.json({"err":"invalid match id"});
+            }
             res.end();
         }
     }
+}
+
+app.get('/page/matchurls', function(req, res){
+    matchurls_func(req,res,"html");
+});
+
+app.get('/api/matchurls', function(req, res){
+    matchurls_func(req,res,"json");
 });
 
 http.createServer(app).listen(app.get('port'), function(){
