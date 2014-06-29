@@ -36,7 +36,55 @@ app.get('/', function(req, res){
     res.redirect("/page/matchurls");
 });
 
-var matchurls_func = function(req, res, content_type) {
+var matchurls_using_steam = function(req, res, content_type, save2db, matchId) {
+    // We need new data from Dota.
+    steam.getMatchDetails(matchId, function(err, data) {
+        if (err) {
+            if(content_type=="html") {
+                res.render('index', {
+                    title: 'match urls!',
+                    error: err
+                });
+            } else {
+                res.json({"err":err});
+            }
+            res.end();
+        }
+        else {
+            // Save the new data to Mongo
+            if(save2db) {
+                mongodb.save(data, function(err, cb){});
+            }
+            if(content_type=="html") {
+                res.render('index', {
+                    title: 'match urls!',
+                    matchid: matchId,
+                    replayState: data.state,
+                    replayUrl: util.format("http://replay%s.valve.net/570/%s_%s.dem.bz2", data.cluster, data.id, data.salt)
+                });
+            } else {
+                res.json({"matchId":matchId,"replayId":data.id,"replayState":data.state,"replaySalt":data.salt,"replayUrl":util.format("http://replay%s.valve.net/570/%s_%s.dem.bz2", data.cluster, data.id, data.salt)})
+
+            }
+            res.end();
+        }
+    });
+
+    // If Dota hasn't responded by 'request_timeout' then send a timeout page.
+    setTimeout(function(){
+        if(content_type=="html") {
+            res.render('index', {
+                title: 'match urls!',
+                error: "timeout"
+            });
+        } else {
+            res.json({"err":"timeout"});
+        }
+        res.end();
+    }, config.request_timeout);
+}
+
+var matchurls_func = function(req, res, content_type, usedb) {
     var matchId = req.query.matchid;
     if (!matchId) {
         if(content_type=="html") {
@@ -50,8 +98,7 @@ var matchurls_func = function(req, res, content_type) {
     else {
         if (!isNaN(matchId) && parseInt(matchId, 10) < 1024000000000) {
             matchId = parseInt(matchId, 10);
-
-            mongodb.findByMatchId(matchId, function(err, data) {
+            var ffffff = function(err, data) {
                 if (err) {
                     console.log('mongodb find match err')
                     //throw err; 
@@ -72,49 +119,7 @@ var matchurls_func = function(req, res, content_type) {
                     res.end();
                 }
                 else if (steam.ready) {
-                    // We need new data from Dota.
-                    steam.getMatchDetails(matchId, function(err, data) {
-                        if (err) {
-                            if(content_type=="html") {
-                                res.render('index', {
-                                    title: 'match urls!',
-                                    error: err
-                                });
-                            } else {
-                                res.json({"err":err});
-                            }
-                            res.end();
-                        }
-                        else {
-                            // Save the new data to Mongo
-                            mongodb.save(data, function(err, cb){});
-                            if(content_type=="html") {
-                                res.render('index', {
-                                    title: 'match urls!',
-                                    matchid: matchId,
-                                    replayState: data.state,
-                                    replayUrl: util.format("http://replay%s.valve.net/570/%s_%s.dem.bz2", data.cluster, data.id, data.salt)
-                                });
-                            } else {
-                                res.json({"matchId":matchId,"replayId":data.id,"replayState":data.state,"replaySalt":data.salt,"replayUrl":util.format("http://replay%s.valve.net/570/%s_%s.dem.bz2", data.cluster, data.id, data.salt)})
-
-                            }
-                            res.end();
-                        }
-                    });
-
-                    // If Dota hasn't responded by 'request_timeout' then send a timeout page.
-                    setTimeout(function(){
-                        if(content_type=="html") {
-                            res.render('index', {
-                                title: 'match urls!',
-                                error: "timeout"
-                            });
-                        } else {
-                            res.json({"err":"timeout"});
-                        }
-                        res.end();
-                    }, config.request_timeout);
+                    matchurls_using_steam(req,res,content_type,usedb,matchId);
                 }
                 else {
                     // We need new data from Dota, and Dota is not ready.
@@ -128,7 +133,27 @@ var matchurls_func = function(req, res, content_type) {
                     }
                     res.end();
                 }
-            });
+            };
+
+            if(usedb) {
+                mongodb.findByMatchId(matchId, ffffff);
+            } else {
+                if (steam.ready) {
+                    matchurls_using_steam(req,res,content_type,usedb,matchId);
+                }
+                else {
+                    // We need new data from Dota, and Dota is not ready.
+                    if(content_type=="html") {
+                        res.render('index', {
+                            title: 'match urls!',
+                            error: "notready"
+                        });
+                    } else {
+                        res.json({"err":"steam notready"});
+                    }
+                    res.end();
+                }
+            }
         }
         else {
             // Match ID failed validation.
